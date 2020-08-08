@@ -52,17 +52,6 @@ $sharedKey =  $env:workspaceKey
 $LogType = "Okta"
 $TimeStampField = "published"
 
-##########################################################
-$AzureWebJobsStorage = "DefaultEndpointsProtocol=https;AccountName=oktassofe5chbbm5m4go;AccountKey=1YwxsHGBnuh4hHUiKchN/W5AxWd/sLAc5PTRU4X2YwPo51Y6BWUEcMLXwUf2KnzEtjcYMn4kodaMy2Ms+hBaoQ==;EndpointSuffix=core.windows.net"
-$apiToken = "00f2T0GXh6VBJs-1CumnAMp1KcEqbiEW1fHlHAvXHn"
-$uri = "https://microsoft-chrisabberley-admin.okta.com/api/v1/logs?since="
-$CustomerID = "704556ca-6777-455a-ae5f-3c66d2fea2c0"
-$sharedKey = "bdJM2rQyTljl1qtABNhvSixjk58+MaH2TuF9/RLPsGVbkwifIyh04eVN4tI/0oJJtA0FnWKF1q4VO0b6fYBirQ=="
-$Tablename = "OKTA6b"
-$LogType = "Okta444466"
-$StartDate = "2020-08-06T00:00:00.000Z"
-###########################################################
-
 # Retrieve Timestamp from last records received from Okta 
 # Check if Tabale has already been created and if not create it to maintain state between executions of Function
 $storage =  New-AzStorageContext -ConnectionString $AzureWebJobsStorage
