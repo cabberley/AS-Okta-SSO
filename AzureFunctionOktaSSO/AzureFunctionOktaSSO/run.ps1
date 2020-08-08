@@ -14,8 +14,13 @@
 
 
     DESCRIPTION
-    This Function App calls the Okta System Log API (https://developer.okta.com/docs/reference/api/system-log/) to pull the Okta System logs. The response from the Okta API is recieved in JSON format. This function will build the signature and authorization header 
-    needed to post the data to the Log Analytics workspace via the HTTP Data Connector API. The Function App will post the Okta logs to the Okta_CL table in the Log Analytics workspace.
+    This Function App calls the Okta System Log API (https://developer.okta.com/docs/reference/api/system-log/) to pull the Okta System logs. The response from the Okta API is recieved in JSON format. 
+    This function will build the signature and authorization header needed to post the data to the Log Analytics workspace via the HTTP Data Connector API. 
+    The Function App will post the Okta logs to the Okta_CL table in the Log Analytics workspace.
+
+    NOTES:
+    Suggested timing trigger of no less than 10 minutes. Be aware that Azure Functions have a runtime execution time limit of 5 mins, at which point it will terminate the function.
+    If this occurs you may get some duplicate records in your Azure Logs as it will not commit the last datetime until the records are written to Azure logs.
 #>
 
 # Input bindings are passed in via param block.
@@ -66,9 +71,6 @@ if($null -eq $row.StartTime){
     $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $apiToken -ErrorAction Ignore
 }
 $StartDate =  $row.StartTime
-if($null -eq $StartDate){$StartDate =  [System.DateTime]::UtcNow.ToString("yyyy-MM-ddT00:00:00.000Z") }
-
-
 
 #Setup uri Headers for requests to OKta
 $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
@@ -77,26 +79,35 @@ $headers.Add("User-Agent", "AzureFunction")
 $headers.Add("Authorization", "SSWS $apiToken")
 
 #set starting uri for requests from Okta
-$uri = "$uri$($startDate)&limit=1000"
+$uri = "$uri$($StartDate)&limit=1000"
 
 # begin looping through responses from OKTA until we get all available records
-
+$exitDoUntil = $false
 do {
-    $exitDoUntil =0
     $body = $null
-    $response = Invoke-WebRequest -uri $uri  -Method 'GET' -Headers $headers -Body $body
+    if($uri.length -gt 0){
+        $response = Invoke-WebRequest -uri $uri  -Method 'GET' -Headers $headers -Body $body
+    }
     if($response.headers.Keys -contains "link"){
-        #got valid Link Header in Response
-        $uri = $response.headers.link.split(",|;")[2] -replace "<|>", ""
-        $responseCount = (ConvertFrom-Json $response.content).count
-        if($responseCount -gt 0){
-            $TotalRecordCount= $TotalRecordCount + $responseCount
-            $exitDoUntil =1
-            $responseDate = ([datetime]::parseexact(($response.headers.date),"ddd, dd MMM yyyy HH:mm:ss Z",$null)).ToString('yyyy-MM-ddThh:mm:ssZ')
-            #we have at least 1 record
-            # Function to create the authorization signature
-            Function Build-Signature ($customerId, $sharedKey, $date, $contentLength, $method, $contentType, $resource)
-            {
+        $uri = $response.headers.link.split(",;")
+        $uri = $uri.split(";")
+        $uri = $uri[2] -replace "<|>", ""
+    }
+    ELSE{
+        $exitDoUntil = $true
+    }
+    $responseCount = (ConvertFrom-Json $response.content).count
+    if($ResponseCount -gt 0) {
+        $responseDate = ConvertFrom-Json $response.content
+        $responseDate = $responseDate.published.ticks | Sort-Object -Descending
+        $responseDate = $responseDate[0]
+        $responseDate = Get-Date -Date $ResponseDate     
+        $responsedate = $responsedate.tostring('yyyy-MM-ddTHH:mm:ss.fffZ')
+        $TotalRecordCount= $TotalRecordCount + $responseCount
+
+        # Function to create the authorization signature
+        Function new-BuildSignature ($customerId, $sharedKey, $date, $contentLength, $method, $contentType, $resource)
+        {
             $xHeaders = "x-ms-date:" + $date
             $stringToHash = $method + "`n" + $contentLength + "`n" + $contentType + "`n" + $xHeaders + "`n" + $resource
             $bytesToHash = [Text.Encoding]::UTF8.GetBytes($stringToHash)
@@ -107,41 +118,42 @@ do {
             $encodedHash = [Convert]::ToBase64String($calculatedHash)
             $authorization = 'SharedKey {0}:{1}' -f $customerId,$encodedHash
             return $authorization
-            }
-
-            $contentType = "application/json"
-            $resource = "/api/logs"
-            $rfc1123date = [DateTime]::UtcNow.ToString("r")
-            $body = ([System.Text.Encoding]::UTF8.GetBytes($response))
-            $contentLength = $body.Length
-            $signature = Build-Signature `
-                -customerId $customerId `
-                -sharedKey $sharedKey `
-                -date $rfc1123date `
-                -contentLength $contentLength `
-                -method $method `
-                -contentType $contentType `
-                -resource $resource
-            $LAuri = "https://" + $customerId + ".ods.opinsights.azure.com" + $resource + "?api-version=2016-04-01"
-            $LAheaders = @{
-                "Authorization" = $signature;
-                "Log-Type" = $logType;
-                "x-ms-date" = $rfc1123date;
-                "time-generated-field" = $TimeStampField;
-            }
-            $result = Invoke-WebRequest -Uri $LAuri -Method "POST" -ContentType $contentType -Headers $LAheaders -Body $body -UseBasicParsing
         }
-        else{
-        if($TotalRecordCount -lt 1){
-            Write-Output "OKTASSO: No new Okta logs are available as of $startDate"
-            }
+        $method="POST"
+        $contentType = "application/json"
+        $resource = "/api/logs"
+        $rfc1123date = [DateTime]::UtcNow.ToString("r")
+        $body = ([System.Text.Encoding]::UTF8.GetBytes($response))
+        $contentLength = $body.Length
+        $signature = new-BuildSignature `
+            -customerId $customerId `
+            -sharedKey $sharedKey `
+            -date $rfc1123date `
+            -contentLength $contentLength `
+            -method $method `
+            -contentType $contentType `
+            -resource $resource
+        $LAuri = "https://" + $customerId + ".ods.opinsights.azure.com" + $resource + "?api-version=2016-04-01"
+        $LAheaders = @{
+            "Authorization" = $signature;
+            "Log-Type" = $logType;
+            "x-ms-date" = $rfc1123date;
+            "time-generated-field" = $TimeStampField;
         }
+             $result = Invoke-WebRequest -Uri $LAuri -Method $method -ContentType $contentType -Headers $LAheaders -Body $body -UseBasicParsing
     }
-} until($exitDoUntil -eq 0) 
+    else{
+        $exitDoUntil = $true
+    }
+}until($exitDoUntil) 
+
 #update State table for next time we execute function
 #store details in function storage table to retrieve next time function runs 
-if($responseDate.length -gt 0){
+if($responseDate.length -gt 2){
     $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $apiToken -property @{"StartTime"=$responseDate} -UpdateExisting
+}
+if($TotalRecordCount -lt 1){
+    Write-Output "OKTASSO: No new Okta logs are available as of $startDate"
 }
 # Write an information log with the current time.
 $finishtime = ((Get-Date).ToUniversalTime())
