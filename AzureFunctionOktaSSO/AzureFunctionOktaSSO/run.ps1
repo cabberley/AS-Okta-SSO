@@ -52,6 +52,17 @@ $sharedKey =  $env:workspaceKey
 $LogType = "Okta"
 $TimeStampField = "published"
 
+##########################################################
+$AzureWebJobsStorage = "DefaultEndpointsProtocol=https;AccountName=oktassofe5chbbm5m4go;AccountKey=1YwxsHGBnuh4hHUiKchN/W5AxWd/sLAc5PTRU4X2YwPo51Y6BWUEcMLXwUf2KnzEtjcYMn4kodaMy2Ms+hBaoQ==;EndpointSuffix=core.windows.net"
+$apiToken = "00f2T0GXh6VBJs-1CumnAMp1KcEqbiEW1fHlHAvXHn"
+$uri = "https://microsoft-chrisabberley-admin.okta.com/api/v1/logs?since="
+$CustomerID = "704556ca-6777-455a-ae5f-3c66d2fea2c0"
+$sharedKey = "bdJM2rQyTljl1qtABNhvSixjk58+MaH2TuF9/RLPsGVbkwifIyh04eVN4tI/0oJJtA0FnWKF1q4VO0b6fYBirQ=="
+$Tablename = "OKTA7"
+$LogType = "Okta97a"
+###########################################################
+
+
 # Retrieve Timestamp from last records received from Okta 
 # Check if Tabale has already been created and if not create it to maintain state between executions of Function
 $storage =  New-AzStorageContext -ConnectionString $AzureWebJobsStorage
@@ -97,16 +108,24 @@ do {
     ELSE{
         $exitDoUntil = $true
     }
-    $responseCount = (ConvertFrom-Json $response.content).count
+    $responseObj = (ConvertFrom-Json $response.content)
+    $responseCount = $responseObj.count
     if($ResponseCount -gt 0) {
         #breakdown into steps as Powershell in Azure Functions doesn't always like multistep combinations
-        $responseDate = ConvertFrom-Json $response.content 
-        $responseDate = $responseDate.published.ticks | Sort-Object -Descending
+        $responseDate = $responseObj.published.ticks | Sort-Object -Descending
         $responseDate = $responseDate[0]
         $responseDate = Get-Date -Date $ResponseDate  
         $responsedate = $responsedate.tostring('yyyy-MM-ddTHH:mm:ss.fffZ')
+
+        #ACN_CD_OktaIssue925
+        $domain = [regex]::matches($uri, 'https:\/\/([\w\.\-]+)\/').captures.groups[1].value
+        $responseObj = $response | ConvertFrom-Json
+        $responseObj | Add-Member -MemberType NoteProperty -Name "domain" -Value $domain
+        $json = $responseObj | ConvertTo-Json -Depth 5
  
-        $TotalRecordCount= $TotalRecordCount + $responseCount
+        IF($response.headers.RawContentLength -ieq 2){
+            $TotalRecordCount= $TotalRecordCount + $responseCount
+        }
 
         Function new-BuildSignature ($customerId, $sharedKey, $date, $contentLength, $method, $contentType, $resource)
         {
@@ -125,7 +144,8 @@ do {
         $contentType = "application/json"
         $resource = "/api/logs"
         $rfc1123date = [DateTime]::UtcNow.ToString("r")
-        $body = ([System.Text.Encoding]::UTF8.GetBytes($response))
+        
+        $body = ([System.Text.Encoding]::UTF8.GetBytes($json))
         $contentLength = $body.Length
         $signature = new-BuildSignature `
             -customerId $customerId `
