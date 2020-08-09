@@ -7,6 +7,7 @@
 - Added using a table on Azure Storage account of function to maintain state of latest event time provided in OKTA Response 
 - Added logic to use OKTA time detials in records to track last record returned from OKTA
 - Added Loop to continue getting paged results from OKTA until either all records retrieved or getting close (260 seconds) to Azure Function default timeout (300 seconds)
+- Added dependency on Powershell modules 'AZTable' and 'Az.OperationalInsights'
 - Fixed Timestamp to corret field from OKTA "published" field for Azure Log Analytics Time Generated header in Post HTTP
 - Fixed HTTP Request to OKTA, we need the Headers and 'Invoke-RestMethod' won't provide them
 - Fixed HTTP request to OKTA to use limit, since and after parameters to make sure we get all records and also don't get duplicates
