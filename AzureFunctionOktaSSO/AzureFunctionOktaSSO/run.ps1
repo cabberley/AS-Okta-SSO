@@ -1,10 +1,14 @@
 ﻿<#  
     Title:          Okta Data Connector
     Language:       PowerShell
-    Version:        2.0
+    Version:        2.1.0
     Author(s):      Microsoft - Chris Abberley
-    Last Modified:  7/22/2020
-    Comment:        Fixes for the following issues with Version 1
+    Last Modified:  8/18/2020
+    Comment:        Changes from Version 2.0.0 to 2.1.0
+                    -Added fix for issue: ACN_CD_OktaIssue925
+                    -Modified Event log tracking to use OKTA Next URI to fix small quantity of duplicates that were occurring
+                    -Fixed Total Record Counter 
+                    Fixes for the following issues with Version 1
                     -Potential Data loss due to code not processing linked pages
                     -Potential Data loss due to variations in execution of Triggers
                     -Corrected Timestamp field for Okta logs which use "published"
@@ -19,8 +23,9 @@
     The Function App will post the Okta logs to the Okta_CL table in the Log Analytics workspace.
 
     NOTES:
-    Suggested timing trigger of no less than 10 minutes. Be aware that Azure Functions have a runtime execution time limit of 5 mins, at which point it will terminate the function.
-    If this occurs you may get some duplicate records in your Azure Logs as it will not commit the last datetime until the records are written to Azure logs.
+    Suggested timing trigger of no less than 10 minutes. Be aware that Azure Functions have a runtime execution time limit of 5 mins by default, at which point it will terminate the function.
+    Function Timeout has been changed to 10 minutes and Function will try to gracefully exit after 9 minutes.
+    If you reduce the timeout to less than 10 minutes this you may get some duplicate records in your Azure Logs as it will not commit the last datetime until the records are written to Azure logs.
 #>
 
 # Input bindings are passed in via param block.
