@@ -77,7 +77,6 @@ if($null -eq $row.uri){
     $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $apiToken -property @{"uri"=$uri} -UpdateExisting
     $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $apiToken -ErrorAction Ignore
 }
-write-output "Table: ($row.uri)"
 $uri = $row.uri
 
 #Setup uri Headers for requests to OKta
@@ -104,7 +103,6 @@ do {
         $exitDoUntil = $true
     }
     if($uri -ne $uriself){
-        write-output "Not Equal"
         $responseObj = (ConvertFrom-Json $response.content)
         $responseCount = $responseObj.count
         $TotalRecordCount= $TotalRecordCount + $responseCount
