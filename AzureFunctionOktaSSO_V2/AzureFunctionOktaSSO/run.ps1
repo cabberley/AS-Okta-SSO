@@ -42,7 +42,8 @@ else{
 }
 #Azure Function State management between Executions
 $AzureWebJobsStorage =$env:AzureWebJobsStorage  #Storage Account to use for table to maintain state for log queries between executions
-$Tablename = "OKTA"                             #Tablename which will hold datetime record between executions
+$Tablename = "OKTA"                             #Azure Storage Table name which will hold the event log state record between executions
+$AzTableRow = $env:workspaceId                  #Azure Storage Table Row key 
 $TotalRecordCount = 0
 
 # variables needed for the Okta API request
@@ -53,7 +54,7 @@ $StartDate = [System.DateTime]::UtcNow.ToString("yyyy-MM-ddT00:00:00.000Z") # se
 # Define the Log Analytics Workspace ID and Key and Custom Table Name
 $customerId = $env:workspaceId
 $sharedKey =  $env:workspaceKey
-$LogType = "Okta"
+$LogType = "Okta"               #Azure Sentinel Custom Table Name to ingest the data into
 $TimeStampField = "published"
 
 
@@ -65,17 +66,17 @@ if($null -eq $StorageTable.Name){
     $result = New-AzStorageTable -Name $Tablename -Context $storage
     $Table = (Get-AzStorageTable -Name $Tablename -Context $storage.Context).cloudTable
     $uri = "$uri$($StartDate)&limit=1000"
-    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $apiToken -property @{"uri"=$uri} -UpdateExisting
+    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $AzTableRow -property @{"uri"=$uri} -UpdateExisting
 }
 Else {
     $Table = (Get-AzStorageTable -Name $Tablename -Context $storage.Context).cloudTable
 }
 # retrieve the row
-$row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $apiToken -ErrorAction Ignore
+$row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $AzTableRow -ErrorAction Ignore
 if($null -eq $row.uri){
     $uri = "$uri$($StartDate)&limit=1000"
-    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $apiToken -property @{"uri"=$uri} -UpdateExisting
-    $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $apiToken -ErrorAction Ignore
+    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $AzTableRow -property @{"uri"=$uri} -UpdateExisting
+    $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $AzTableRow -ErrorAction Ignore
 }
 $uri = $row.uri
 
@@ -151,7 +152,7 @@ do {
         $result = Invoke-WebRequest -Uri $LAuri -Method $method -ContentType $contentType -Headers $LAheaders -Body $body -UseBasicParsing
         #update State table for next time we execute function
         #store details in function storage table to retrieve next time function runs 
-        $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $apiToken -property @{"uri"=$uri} -UpdateExisting
+        $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $AzTableRow -property @{"uri"=$uri} -UpdateExisting
     }
     else{
         $exitDoUntil = $true
