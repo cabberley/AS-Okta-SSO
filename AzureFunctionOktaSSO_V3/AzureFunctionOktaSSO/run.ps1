@@ -33,18 +33,32 @@ param($Timer)
 # Get the current universal time in the default string format
 $currentUTCtime = (Get-Date).ToUniversalTime()
 # The 'IsPastDue' porperty is 'true' when the current function invocation is later than scheduled.
-if ($Timer.IsPastDue) {
-    Write-Host "OKTASSO: Azure Function triggered at: $currentUTCtime - timer is running late!"
+#Get Telemetry workspace Environemnt Information
+$TelemetryId = $env:TelemetryWorkspace
+$TelemetryKey = $env:TelemetryWorkspaceKey
+$TelemetryTable = "OktaSSOLogsTEST"
+$Telemetry = @{}
+if ($TelemetryId) { 
+    $Telemetry += @{'TriggeredTime' = $currentUTCtime}
 }
-else{
-    Write-Host "OKTASSO: Azure Function triggered at: $currentUTCtime - timer is ontime!"
+Else {
+    if ($Timer.IsPastDue) {
+        Write-Host "OKTASSO: Azure Function triggered at: $currentUTCtime - timer is running late!"
+    }
+    else{
+        Write-Host "OKTASSO: Azure Function triggered at: $currentUTCtime - timer is ontime!"
+    }
+}
+#Load PowerSHell Modules
+Import-Module AzureCore -Force
 
-}
 #Azure Function State management between Executions
 $AzureWebJobsStorage =$env:AzureWebJobsStorage  #Storage Account to use for table to maintain state for log queries between executions
 $Tablename = "OKTA"      #This is NOT the Azure Sentinel Log Analytics Table #Tablename which will hold datetime record between executions
 $TotalRecordCount = 0
 $ConfigName = 'Okta1' 
+
+$Telemetry += @{'OktaConfig' = $ConfigName}
 
 # variables needed for the Okta API request
 $apiToken = $env:apiToken  #Okta API Token required to authenticate to the Okta API
@@ -57,16 +71,18 @@ $sharedKey =  $env:workspaceKey
 $LogType = "Okta"       #This is the Name for the Azure Sentinel Log Analytics Table
 $TimeStampField = "published"
 
+$Telemetry += @{'LATablename' = $LogType}
+$Telemetry += @{'LAWorkspace' = $customerId}
 
 # Retrieve Timestamp from last records received from Okta 
 # Check if Tabale has already been created and if not create it to maintain state between executions of Function
 $storage =  New-AzStorageContext -ConnectionString $AzureWebJobsStorage
 $StorageTable = Get-AzStorageTable -Name $Tablename -Context $Storage -ErrorAction Ignore
 if($null -eq $StorageTable.Name){  
-    $null = New-AzStorageTable -Name $Tablename -Context $storage
+    $result = New-AzStorageTable -Name $Tablename -Context $storage
     $Table = (Get-AzStorageTable -Name $Tablename -Context $storage.Context).cloudTable
     $uri = "$uri$($StartDate)&limit=1000"
-    $null = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $ConfigName -property @{"uri"=$uri} -UpdateExisting
+    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $ConfigName -property @{"uri"=$uri} -UpdateExisting
 }
 Else {
     $Table = (Get-AzStorageTable -Name $Tablename -Context $storage.Context).cloudTable
@@ -75,7 +91,7 @@ Else {
 $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $ConfigName -ErrorAction Ignore
 if($null -eq $row.uri){
     $uri = "$uri$($StartDate)&limit=1000"
-    $null = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $ConfigName -property @{"uri"=$uri} -UpdateExisting
+    $result = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $ConfigName -property @{"uri"=$uri} -UpdateExisting
     $row = Get-azTableRow -table $Table -partitionKey "part1" -RowKey $ConfigName -ErrorAction Ignore
 }
 $uri = $row.uri
@@ -89,11 +105,13 @@ $headers.Add("Accept-Encoding", "gzip, br")
 
 # begin looping through responses from OKTA until we get all available records
 $exitDoUntil = $false
+$TelemetryUri = @()
 do {
     $body = $null
     $uriself = $uri
     if($uri.length -gt 0){
         $response = Invoke-WebRequest -uri $uri  -Method 'GET' -Headers $headers -Body $body
+        $TelUri = $uri
     }
     if($response.headers.Keys -contains "link"){
         $uritemp = $response.headers.link.split(",;")
@@ -110,9 +128,10 @@ do {
         
         #ACN_CD_OktaIssue925
         $domain = [regex]::matches($uri, 'https:\/\/([\w\.\-]+)\/').captures.groups[1].value
+        #$responseObj = $response | ConvertFrom-Json
         $responseObj | Add-Member -MemberType NoteProperty -Name "domain" -Value $domain
         $json = $responseObj | ConvertTo-Json -Depth 5
-         
+                
         Function new-BuildSignature ($customerId, $sharedKey, $date, $contentLength, $method, $contentType, $resource)
         {
             $xHeaders = "x-ms-date:" + $date
@@ -148,7 +167,9 @@ do {
             "x-ms-date" = $rfc1123date;
             "time-generated-field" = $TimeStampField
         }
-        $null = Invoke-WebRequest -Uri $LAuri -Method $method -ContentType $contentType -Headers $LAheaders -Body $body -UseBasicParsing
+        $result = Invoke-WebRequest -Uri $LAuri -Method $method -ContentType $contentType -Headers $LAheaders -Body $body -UseBasicParsing
+
+        $TelemetryUri += 'Uri: ' + $TelUri + '; RecordsRetrieved: ' + $responseCount + '; PostToLogAnaResult: ' + $result + '; PostSize: ' + $contentLength
         #update State table for next time we execute function
         #store details in function storage table to retrieve next time function runs 
         $null = Add-AzTableRow -table $Table -PartitionKey "part1" -RowKey $ConfigName -property @{"uri"=$uri} -UpdateExisting
@@ -161,8 +182,23 @@ do {
 }until($exitDoUntil) 
 
 if($TotalRecordCount -lt 1){
-    Write-Output "OKTASSO: No new Okta logs since $StartDate are available as of $currentUTCtime"
+    if ($TelemetryId) { 
+        $Telemetry += @{'TriggerStatus' = "No new Okta logs since $StartDate are available as of $currentUTCtime"}
+    }
+    Else{
+        Write-Output "OKTASSO: No new Okta logs since $StartDate are available as of $currentUTCtime"
+    }
 }
 # Write an information log with the current time.
 $finishtime = ((Get-Date).ToUniversalTime())
-Write-Output "OktaSSO: Azure function completed, started: $currentUTCtime, Completed: $finishtime, Processed: $totalrecordcount records"
+if ($TelemetryId) { 
+    $Telemetry += @{'OktaAPIRequests' = $TelemetryUri}
+    $Telemetry += @{'TriggerStatus' = "Azure function completed Records Retrieved"}
+    $Telemetry += @{"CompletedTime" = $finishtime}
+    $Telemetry += @{'TotalRecordsRetrieved' = $totalrecordCount}
+    $null = Invoke-LogAnalyticsData -CustomerId $TelemetryId -SharedKey $TelemetryKey -Body (ConvertTo-Json $Telemetry -Depth 10) -LogTable $TelemetryTable -TimeStampField '' -ResourceId '' 
+}
+Else{
+    Write-Output "OktaSSO: Azure function completed, started: $currentUTCtime, Completed: $finishtime, Processed: $totalrecordcount records"
+}
+
