@@ -1,3 +1,7 @@
+## 2.1.2
+- fixed a bug with the extraction and insertion of the domain name into the record set to ingest into Log Analytics
+- Changed the value used for the RowKey to a config name instrad of the Okta API, Okta API can be changed on demand by admins
+
 ## 2.1.0
 - Modified Okta Event log tracking to use next URI link from header
 - Fixed Total record counter to record correctly the total number of records ingested
